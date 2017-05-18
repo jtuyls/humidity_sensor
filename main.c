@@ -85,7 +85,7 @@ menuItems menu[] = {
     {"",0,"",0,0,0,0,0,0},                                                  //0
     {"1. Bienvenida\n",0,"",2,4,1,0,0,&testFun},                            //1
     {"2. Medir",0,"",3,1,5,0,0,0,},                                       //2
-    {"3. Calibrate",0,"",4,2,8,0,0,0},                                      //3
+    {"3. Calibrar",0,"",4,2,8,0,0,0},                                      //3
     {"4. Battery check",0,"",1,3,4,0,0,&checkBattery},                      //4
 
     {"2.1 Measure\n capacitor",0,"",6,7,5,0,0,&measureCapacitance},         //5
