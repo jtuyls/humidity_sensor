@@ -1,0 +1,13 @@
+
+build/
+dist/
+nbproject/private/
+
+*.d
+*.obj
+*.mk
+*.bash
+
+funclist
+nbproject/Makefile-genesis.properties
+
