@@ -885,7 +885,7 @@ void getCoefficientsTest(void)
 {
      LCD_clear();
      LCD_write_string("Coeff 1\n");
-     LCD_write_number(a*);
+     LCD_write_number(a);
      waitForPbs();
 
      LCD_clear();
@@ -907,11 +907,6 @@ void getCoefficientsTest(void)
 
 void getCoefficients(void)
 {
-    LCD_clear();
-    LCD_write_string("Primero coeff\n");
-    LCD_write_number(a);
-    waitForPbs();
-
     LCD_clear();
     LCD_write_string("Primero coeff * 100000\n");
     LCD_write_number(a*100000);
