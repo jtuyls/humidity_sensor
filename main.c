@@ -1,16 +1,3 @@
-/* 
- * File:   main.c
- * Author: Florian de Roose, Thomas Valkaert, Jorn Tuyls
- *
- * Created on May 18, 2017, 10:03 AM
- */
-
-
-#include "constants.h"
-#include "LCD_code.h"
-#include "initialize.h"
-#include <xc.h>
-
 // #pragma config statements should precede project file includes.
 // Use project enums instead of #define for ON and OFF.
 
@@ -33,76 +20,100 @@
 #pragma config BORV = LO        // Brown-out Reset Voltage Selection (Brown-out Reset Voltage (Vbor), low trip point selected.)
 #pragma config LVP = OFF        // Low-Voltage Programming Enable (High-voltage on MCLR/VPP must be used for programming)
 
+#include "constants.h"
+#include "LCD_code.h"
+#include "initialize.h"
+#include <math.h>
+#include <xc.h>
+
+
 typedef struct menuItems {
-	const char *text1;
-	unsigned int *number;
-	const char *text2;
-	int scrollDown;
-        int scrollUp;
-	int enter;
-	void (*actionScrollDown)( void );
-        void (*actionScrollUp)  ( void );
-	void (*actionEnter)     ( void );
+    const char *text1;
+
+    int scrollDown;
+    int scrollUp;
+    int enter;
+
+    void (*actionScrollDown)( void );
+    void (*actionScrollUp)  ( void );
+    void (*actionEnter)     ( void );
 
 } menuItems;
 
+
+// globals
+
+int admin;
 unsigned int TMR1overflow, counter2;
 unsigned int TMRhigh, TMRlow, periodMeasured;
-unsigned int tempCal, tempCal10, tempADC, tempMeasured;
+unsigned int tempCal, tempADC, tempMeasured;
 __eeprom unsigned int tempADC_PROM, tempMeasured_PROM;
-__eeprom unsigned int period0p, period100p;
+__eeprom double a, b, c, d;
+__eeprom unsigned int empty;
+int accessCode[3];
 bit START, STOP, BUSY;
+
+unsigned int metingen[3];
 
 void waitForPb1 (void);
 void waitForPb2 (void);
 void waitForPb3 (void);
 
-void tempCalUp10(void);
-void tempCalDown10(void);
-void tempCalUp(void);
-void tempCalDown(void);
 void tempCalAct(void);
 
 void tempMeasureAct(void);
 
-void testFun(void);
+unsigned int humedadPergamino(void);
+unsigned int humedadOro(void);
 
 void checkBattery(void);
 
-void measureCapacitance(void);
-void capacitanceCap0p(void);
-void capacitanceCap100p(void);
+void measureCapacitance(void);     // ? void measureFrequency(void)
 
-void calibrate(void);
+//void calibrate(void);
 
-unsigned int divide2(unsigned long dividend, unsigned int divisor);
+unsigned int inputTemperature(void);
 
-unsigned int offset;
-unsigned int rico;
-unsigned int empty;
+void calibrateTemperature(void);
+
+void calibrateCoffee(void);
+
+void inputCoefficients(void);
+void testCoeff(void);
+
+void showMeasuredTemp(void);
+
+double power(float ground, int exponent);
+
+unsigned int calibrateWarning(void);
+
+unsigned int testHumidity(void);
+
+unsigned int inputHumidity(void);
+
+int inputCodeDigits(void);
+
+void getCoefficientsTest(void);
+
+void getCoefficients(void);
+
+int checkCode(int code[]);
+
+void test(void);
 
 menuItems menu[] = {
-    {"",0,"",0,0,0,0,0,0},                                                  //0
-    {"1. Bienvenida\n",0,"",2,4,1,0,0,&testFun},                            //1
-    {"2. Medir",0,"",3,1,5,0,0,0,},                                       //2
-    {"3. Calibrar",0,"",4,2,8,0,0,0},                                      //3
-    {"4. Battery check",0,"",1,3,4,0,0,&checkBattery},                      //4
-
-    {"2.1 Measure\n capacitor",0,"",6,7,5,0,0,&measureCapacitance},         //5
-    {"2.2 Measure\n temperature",0,"",7,5,14,0,0,&tempMeasureAct},          //6
-    {"2.3 Return",0,"",5,6,1,0,0,0},                                        //7
-
-    {"3.1 Calibrate\n without cap",0,"",9,11,8,0,0,&calibrate},             //8 &capacitanceCap0p
-    {"3.2 Calibrate\n with 100 pF cap",0,"",10,8,9,0,0,&capacitanceCap100p},//9
-    {"3.3 Calibrate\n temperature",0,"",11,9,12,0,0,0},                     //10
-    {"3.4 Return",0,"",8,10,1,0,0,0},                                       //11
-
-    {"Temperature\n  ",&tempCal10,"XºC",12,12,13,&tempCalUp10,&tempCalDown10,0},        //12
-    {"Temperature\n  ",&tempCal  ,"ºC" ,13,13,1,&tempCalUp,&tempCalDown,&tempCalAct},   //13
-    //{"Measurement\n ",&tempADC,"",1,14,14,0,0,0}
-
-    {"The temperature\nis ",&tempMeasured,"ºC",14,14,6,0,0,0},              //14
-    {"",0,"",0,0,0,0,0,0}
+    {"",0,0,0,0,0,0},                                                   //0
+    {"1. Bienvenido\n",2,4,1,0,0,0},                                    //1
+    {"2. Medir\nCafe Pergamino",3,1,2,0,0,&humedadPergamino},           //2
+    {"3. Medir\nCafe Oro",4,2,3,0,0,&humedadOro},                       //3
+    {"4. Extra",1,3,5,0,0,0},                                           //4
+    {"4.1 Calibrar\nTemperatura",6,10,5,0,0,&calibrateTemperature},      //5
+    {"4.2 Calibrar\nCafe",7,5,6,0,0,&calibrateCoffee},                  //6
+    {"4.3 Adaptar\ncoefficientes",8,6,7,0,0,&inputCoefficients},        //7
+    {"4.4 Mirar\ncoefficientes",9,7,8,0,0,&getCoefficients},            //8
+    {"4.5 Test",10,8,9,0,0,&test},                                          //9
+    {"4.6 Regresar",5,9,4,0,0,0},                                       //10
+    {"",0,0,0,0,0,0}
 };
 
 void measureFrequency(void)
@@ -135,152 +146,13 @@ void measureFrequency(void)
     unsigned int TMRhigh_1 = TMRhigh << 7;
     periodMeasured = TMRlow_1 + TMRhigh_1;
     LED =!LED;
-}
 
-
-unsigned int divide2(unsigned long dividend, unsigned int divisor)
-{
-    unsigned long divisor2 = divisor;
-
-    if (dividend < divisor2)
-        {return 0;}
-
-    unsigned int result = 0;
-    while(1)
-    {
-        char i = 0; // calculate the index of the first significant bit of the quotient
-        while(i<16){
-            if(dividend >= (divisor2 << i) & dividend < (divisor2 << (i+1)))
-            {break;}
-            i++;
-        }
-        if( i !=16)
-        {
-            result += 1<<i; //writing new digit of quotient
-            dividend = dividend - (divisor2 << i);
-        }
-        else
-        {    return result;}
-    }
-
-    return 666;
-}
-
-void testFun(void)
-{
-    unsigned long vochtigheid;
-    unsigned int vochtigheidwhole;
-    unsigned int vochtigheiddec;
-
-    measureFrequency();
-
-    if (periodMeasured>19000)
-    {
-        vochtigheid=periodMeasured-19000;
-        vochtigheid=divide2(vochtigheid*10,913)+112;
-        vochtigheiddec=vochtigheid%10;
-        vochtigheidwhole=vochtigheid/10;
-
-        LCD_clear();
-        LCD_write_number(periodMeasured);
-        LCD_write_string("\n");
-        LCD_write_number(vochtigheidwhole);
-        LCD_write_string(".");
-        LCD_write_number(vochtigheiddec);
-        //LCD_write_string(" ");
-        //LCD_write_number(TMRlow);
-    }
-    else
-    {
-        LCD_clear();
-        LCD_write_number(periodMeasured);
-        LCD_write_string("\n");
-        LCD_write_string("damiaan = banaan");
-    }
-
-    waitForPb2();
-}
-
-void measureCapacitance(void)
-{
-    measureFrequency();
+    // wordt nu niets geprint want geen waitforpb
     LCD_clear();
-    LCD_write_string("Edges: ");
-    LCD_write_number(periodMeasured);
+    LCD_write_number(TMRlow);
     LCD_write_string("\n");
-
-#define accuracy 100
-
-    unsigned int cap0p = 0;
-    unsigned int cap100p = 100; // Alleen gehele getallen => Wrs prescalen en descalen nodig,
-        // Range is tussen 0 en 65535
-
-    unsigned int x  = periodMeasured;
-    unsigned int x1 = period0p;
-    unsigned int x2 = period100p;
-    unsigned int y1 = cap0p;
-    unsigned int y2 = cap100p;
-
-    if (x2 <= x1){
-        LCD_write_string("ERROR");
-        waitForPb2();
-    }
-    if (x <= x1){
-        LCD_write_string("ERROR");
-        waitForPb2();
-    }
-    if (y2 <= y1){
-        LCD_write_string("ERROR");
-        waitForPb2();
-    }
-
-    // Convention: minuscule = integer (2 byte), capital = long (4 byte)
-
-    unsigned int deltax2x1 = x2 - x1;
-    unsigned long deltaX2X1 = deltax2x1;
-    unsigned int deltay2y1 = y2 - y1;
-    unsigned long deltaY2Y1 = deltay2y1;
-    unsigned int deltaxx1 = x - x1;
-    unsigned long deltaXX1 = deltaxx1;
-
-    unsigned long deltaMult = deltaXX1 * deltaY2Y1 * accuracy;
-
-    unsigned int deltayy1 = divide2(deltaMult, deltax2x1);
-    unsigned int y = y1 + deltayy1;
-
-    unsigned int y_whole =  y / accuracy;
-    unsigned int y_fraction = y - accuracy*y_whole;
-
-    LCD_write_number(y_whole);
-    LCD_write_string(".");
-    LCD_write_number(y_fraction);
-    LCD_write_string(" pF");
-
-    waitForPb2();
-}
-
-void capacitanceCap100p(void)
-{
-    measureFrequency();
-    period100p = periodMeasured;
-
-    LCD_clear();
-    LCD_write_string("Edges: ");
-    LCD_write_number(period100p);
-    LCD_write_string("\nDone");
-    waitForPb2();
-}
-
-void capacitanceCap0p(void)
-{
-    measureFrequency();
-    period0p = periodMeasured;
-
-    LCD_clear();
-    LCD_write_string("Edges: ");
-    LCD_write_number(period0p);
-    LCD_write_string("\nDone");
-    waitForPb2();
+    LCD_write_number(TMRhigh);
+    // waitForPb2();
 }
 
 unsigned int tempADC_exec(void)
@@ -330,7 +202,7 @@ void tempMeasureAct(void)
 {
     tempADC = tempADC_exec();
 
-    tempMeasured = tempMeasured_PROM+((tempADC-tempADC_PROM)*1000)/1080;
+    tempMeasured = tempMeasured_PROM+(((signed int) tempADC-(signed int)tempADC_PROM)*1000)/1080;
 }
 
 void tempCalAct(void)
@@ -341,40 +213,6 @@ void tempCalAct(void)
     tempMeasured = tempCal;
     tempMeasured_PROM = tempMeasured;
 }
-
-void tempCalUp10(void)
-{
-    if (tempCal < 30)
-    {
-        tempCal = tempCal+10;
-    }
-    tempCal10 = tempCal/10;
-}
-void tempCalDown10(void)
-{
-    if (tempCal > 19)
-    {
-        tempCal = tempCal-10;
-    }
-    tempCal10 = tempCal/10;
-}
-void tempCalUp(void)
-{
-    if (tempCal < 43)
-    {
-        tempCal = tempCal+1;
-    }
-    tempCal10 = tempCal/10;
-}
-void tempCalDown(void)
-{
-    if (tempCal > 10)
-    {
-        tempCal = tempCal-1;
-    }
-    tempCal10 = tempCal/10;
-}
-
 
 void checkBattery(void)
 {
@@ -404,6 +242,7 @@ void checkBattery(void)
     LCD_write_string("V");
 
     waitForPb2();
+
 }
 
 void interrupt ISR(void)
@@ -412,12 +251,12 @@ void interrupt ISR(void)
     {
         if(counter2 == 10)
         {
-                TMR1ON	= 1;
+                TMR1ON  = 1;
         }
         if(counter2 == 1010)
         {
-                TMR1ON 	= 0;
-                OscOn	= 0;
+                TMR1ON  = 0;
+                OscOn   = 0;
         }
         counter2++;  // CCO oscillator counter increment
         OscOut_Flag = 0;
@@ -426,11 +265,10 @@ void interrupt ISR(void)
 
     if (TMR1IF && TMR1IE )
     {
-	TMR1overflow++;
-	TMR1IF = 0;  // Interrupt Flag
+    TMR1overflow++;
+    TMR1IF = 0;  // Interrupt Flag
     }
 }
-
 
 void waitForPb1 (void)
 {
@@ -536,103 +374,709 @@ char waitForPbs(void)
     return 0;
 }
 
-void calibrate()
+int checkCode(int inputCode[3])
 {
-    /*
-     * y is de vochtigheid
-     * x is het aantal flanken
-     */
-    unsigned int sumx;
-    unsigned int sumxy;
-    unsigned int sumy;
-    unsigned int sumxx;
-    unsigned char vochtigheid;
-    unsigned char i;
+    if (inputCode[0] == accessCode[0] && inputCode[1] == accessCode[1] && inputCode[2] == accessCode[2])
+    {   admin = 1;
+        return 1;}
 
-    unsigned long vochtdec;
-    unsigned long vochtwhole;
+    return 0;
+}
 
-    sumx=0;
-    sumxy=0;
-    sumy=0;
-    sumxx=0;
 
-    // lege meting
-    LCD_clear();
-    LCD_write_string("meet met lege bak");
-    waitForPbs();
-    measureFrequency();
-    empty = periodMeasured;
+int inputCodeDigits(void)
+{
+    unsigned int codeIndex=0;
+    unsigned int i;
 
-    // volle metingen
-#define N 3
-    for(i=0; i<N; i++)
+    // Code vector and his length
+    unsigned int length_code = 3;
+    int inputCode[3]={0,0,0};
+
+    char button;
+
+    if(admin)
+        {return 1; }
+
+
+    for (;;)
     {
-        // flanken bepalen
         LCD_clear();
-        LCD_write_string("meet met bonen");
-        waitForPbs();
-        measureFrequency();
+        LCD_write_string("Codigo entrada\n");
+        LCD_write_number(inputCode[0]);
+        LCD_write_number(inputCode[1]);
+        LCD_write_number(inputCode[2]);
+        LCD_display_cursor();
 
-        // vochtigheid bepalen
-        vochtwhole=12;
-        vochtdec=0;
+        for(i=0; i<(length_code-codeIndex); i++)
+        {  LCD_decrement_cursor(); }
 
-        for(;;)
-        {
-            LCD_clear(); // Dit kan beter via menustructuur, maar veel werk, eerst zo testen
-            LCD_write_string("vochtigheid");
-            LCD_write_number(vochtwhole);
-            LCD_write_string(".");
-            LCD_write_number(vochtdec);
+        button = waitForPbs();
 
-            char button = waitForPbs();
-            if(button == 1)
+        if(button == 3)                  // Return button
             {
-                vochtdec = vochtdec - 1;
-                if (vochtdec > 9)
+            if (codeIndex == 0)
                 {
-                    vochtdec = 9;
-                    if (vochtwhole>10)
+                LCD_remove_cursor();
+                return 0;
+                }
+            else
+                {
+                codeIndex = codeIndex - 1;
+                }
+            }
+
+        if(button == 2)                  // Enter button
+            {
+                codeIndex = codeIndex + 1;
+
+                if (codeIndex == length_code)
+                {
+                    LCD_remove_cursor();
+
+                 if (checkCode(inputCode))
+                 {   LCD_clear();
+                     LCD_write_string("Codigo correcto");
+                     waitForPbs();
+
+                     return 1;
+                    }
+                 else
                     {
-                        vochtwhole = vochtwhole - 1;
+                     LCD_clear();
+                     LCD_write_string("Codigo no\ncorrecto");
+                     waitForPbs();
+
+                     return 0;
                     }
                 }
             }
 
-            if(button == 2)
+         if(button == 1)                         // Increase/forward button
             {
-                break;
+            inputCode[codeIndex] = (inputCode[codeIndex] + 1) % 5;
             }
 
-            if(button == 3)
+         }
+
+}
+
+unsigned int inputTemperature(void)
+{
+    unsigned int temperatureIndex=0;
+    unsigned int i;
+
+    // Code vector and his length
+    unsigned int length_temperature = 2;
+    int temperature[2]={0,0};
+
+    char button;
+
+    for (;;)
+    {
+        LCD_clear();
+        LCD_write_string("Temperatura\n");
+        LCD_write_number(temperature[0]);
+        LCD_write_number(temperature[1]);
+        //LCD_write_string(".");
+        //LCD_write_number(temperature[2]);
+        LCD_write_string("ºC");
+        LCD_display_cursor();
+
+        for(i=0; i<(length_temperature - temperatureIndex + 2); i++)
+        {  LCD_decrement_cursor(); }
+
+        button = waitForPbs();
+
+        if(button == 3)                  // Return button
             {
-                vochtdec = vochtdec + 1;
-                if (vochtdec > 9)
+            if (temperatureIndex == 0)
                 {
-                    vochtdec = 0;
-                    if (vochtwhole<18);
+                LCD_remove_cursor();
+                return 0;
+                }
+            else
+                {
+                temperatureIndex = temperatureIndex - 1;
+                }
+            }
+
+        if(button == 2)                  // Enter button
+            {
+               temperatureIndex = temperatureIndex + 1;
+
+                if (temperatureIndex == length_temperature)
+                {
+                    LCD_remove_cursor();
+                    return (10*temperature[0]+temperature[1]);
+                }
+            }
+
+         if(button == 1)                         // Increase/forward button
+            {
+            temperature[temperatureIndex] = (temperature[temperatureIndex] + 1) % 10;
+            }
+
+         }
+}
+
+void calibrateTemperature(void)
+{
+    if (inputCodeDigits())
+    {
+       tempCal = inputTemperature();
+       LCD_clear();
+       LCD_write_string("Temp calibrata\n");
+       LCD_write_number(tempCal);
+       LCD_write_string("ºC");
+       waitForPbs();
+
+       // To store the calibrated temperature in memory
+       tempCalAct();
+    }
+}
+
+void showMeasuredTemp(void)
+{
+    // Measure temperature
+    // Global variable tempMeasured will be changed
+    tempMeasureAct();
+
+    LCD_clear();
+    LCD_write_string("Temp medida\n");
+    LCD_write_number(tempMeasured);
+    LCD_write_string("ºC");
+    waitForPbs();
+
+}
+
+double power(float ground, int exponent)
+{
+    float result=1;
+
+    if (exponent>0)
+    {
+       for (exponent; exponent>0; exponent--)
+       {
+           result = result*ground;
+       }
+    }
+
+    else
+    {
+        for (exponent; exponent<0; exponent++)
+        {
+            result = result/ground;
+        }
+    }
+
+    return result;
+            
+}
+
+
+void inputCoefficients(void)
+{
+      unsigned int coefficientIndex = 0;
+      unsigned int coefficientNumber = 0;
+      unsigned int i, j, k, m;
+
+      unsigned int nb_coefficients = 4;
+      unsigned int length_coefficient = 8;
+
+       unsigned int counter = 0;
+
+        // to store the coefficients a,b,c,d
+        double temp[4]={0,0,0,0};
+
+        // to store the coefficients and their lengths (should this be global?)
+        unsigned int coefficientMatrix[4][8]={{0,0,10,0,0,0,0,0},
+                                      {0,0,10,0,0,0,0,0},
+                                      {0,0,10,0,0,0,0,0},
+                                      {0,0,10,0,0,0,0,0}};
+        
+
+        char button;
+
+        if (inputCodeDigits())
+        {
+            LCD_clear();
+            LCD_write_string("Insertar\nnumeros del pc");
+            waitForPbs();
+
+            for (coefficientNumber; coefficientNumber<nb_coefficients; coefficientNumber++)
+            {
+                for(;;)
+                {
+                LCD_clear();
+                LCD_write_string("Insertar n.º ");
+                LCD_write_number(coefficientNumber+1);
+                LCD_write_string("\n");
+                for (i=0; i<length_coefficient; i++)
                     {
-                        vochtwhole = vochtwhole + 1;
+                        if(coefficientMatrix[coefficientNumber][i]<10){
+                            LCD_write_number(coefficientMatrix[coefficientNumber][i]);
+                        } else {
+                            LCD_write_string(".");
+                        }
                     }
+                LCD_display_cursor();
+
+                for(m=0; m<(length_coefficient-coefficientIndex); m++)
+                {  LCD_decrement_cursor(); }
+
+                button = waitForPbs();
+
+                if(button == 3)                  // Return button
+                    {
+                    if (coefficientIndex == 0)
+                        {
+                        LCD_clear();
+                        LCD_remove_cursor();
+                        LCD_write_string("Imposibele\nvolver");
+                        waitForPbs();
+                        }
+                    else
+                        {
+                        coefficientIndex = coefficientIndex - 1;
+                        }
+                    }
+
+                if(button == 2)                  // Enter button
+                    {
+                        coefficientIndex = coefficientIndex + 1;
+
+                        if (coefficientIndex == length_coefficient)
+                        {
+                            LCD_remove_cursor();
+                            coefficientIndex = 0;
+                            break;
+                        }
+
+                     }
+
+                 if(button == 1)                         // Increase/forward button
+                    {
+                     if(coefficientMatrix[coefficientNumber][coefficientIndex]<10){
+                        coefficientMatrix[coefficientNumber][coefficientIndex] = \
+                            (coefficientMatrix[coefficientNumber][coefficientIndex] + 1) % 10;
+                     }
+                    }
+                   }
+              }
+
+             for (j=0; j<nb_coefficients; j++)
+              {
+                
+                 counter = 0;
+                 
+                 for (k=0; k<length_coefficient; k++)
+                {
+                     
+                    if(coefficientMatrix[j][k]<10)
+                    {
+                        temp[j] = temp[j] + coefficientMatrix[j][k] * power(10,-(k-1-counter));
+                     }
+                    else
+                    {
+                        counter = 1;
+                    }
+                      
+                }
+              }
+  
+        }
+
+
+            a = temp[0];
+            b = temp[1];
+            c = temp[2];
+            d = temp[3];
+            
+
+}
+
+unsigned int calibrateWarning(void)
+{
+    char button;
+
+    LCD_clear();
+    LCD_write_string("Reinicializar?\n");
+    LCD_write_string("(Si/No/-)");
+
+     for (;;)                         // Pushing button 1 doesn't have any effect
+     {
+        button = waitForPbs();
+
+         if (button == 3)
+        { break; }
+
+         if (button == 2)
+         {
+             return 0;
+         }
+     }
+
+    LCD_clear();
+    LCD_write_string("Borar datos?\n");
+    LCD_write_string("(Si/No/-)");
+
+    for (;;)                         // Pushing button 1 doesn't have any effect
+     {
+        button = waitForPbs();
+
+         if (button == 3)
+        { break; }
+
+         if (button == 2)
+         {
+             return 0;
+         }
+     }
+
+    LCD_clear();
+    LCD_write_string("Esta seguro?\n");
+    LCD_write_string("(Si/No/-)");
+
+    for (;;)                         // Pushing button 1 doesn't have any effect
+     {
+        button = waitForPbs();
+
+         if (button == 3)
+         {
+             return 1;
+         }
+
+         if (button == 2)
+         {
+             return 0;
+         }
+     }
+}
+
+void calibrateCoffee(void)
+{
+    unsigned int measurementIndex = 1;
+    unsigned char i;
+
+    char button;
+
+    double sumPeriod;
+    double sumTemperature;
+
+    #define M 2
+
+    if (inputCodeDigits())
+    {
+        if (calibrateWarning())
+        {
+            LCD_clear();
+            LCD_write_string("Iniciar la\ncalibracion");
+            waitForPbs();
+
+            LCD_clear();
+            LCD_write_string("Medida sin cafe:\n");
+            waitForPbs();
+            measureFrequency();
+            empty = periodMeasured;
+
+            tempMeasureAct();
+
+            LCD_clear();
+            LCD_write_string("Inserte en pc:\n");
+            LCD_write_string("Ciclos ");
+            LCD_write_number(periodMeasured);
+            waitForPbs();
+
+            LCD_clear();
+            LCD_write_string("Inserte en pc:\n");
+            LCD_write_string("Temperatura ");
+            LCD_write_number(tempMeasured);
+            LCD_write_string("ºC");
+            waitForPbs();
+
+            for(;;)
+            {
+                LCD_clear();
+                LCD_write_string("Medida con cafe:\n");
+                LCD_write_string("Numero ");
+                LCD_write_number(measurementIndex);
+                waitForPbs();
+
+                for(i=0; i<M; i++)
+                {
+                    LCD_clear();
+                    LCD_write_string("Poner granos\ncafe: numero ");// granos de cafe?
+                    LCD_write_number(i+1);
+                    waitForPbs();
+
+                    // flanken meten
+                    measureFrequency();
+                    periodMeasured = periodMeasured-empty;
+                    sumPeriod = sumPeriod + periodMeasured;       // tijdelijke variabele
+
+                    // temperatuur meten
+                    tempMeasureAct();
+                    sumTemperature = sumTemperature + tempMeasured;
+
+                    LCD_clear();
+                    LCD_write_string("Vaciar\n");
+                    waitForPbs();
+                }
+
+                // uitmiddelen
+                periodMeasured = sumPeriod/M;
+                sumPeriod = 0;
+                tempMeasured = sumTemperature/M;
+                sumTemperature = 0;
+
+                LCD_clear();
+                LCD_write_string("Inserte en pc:\n");
+                LCD_write_string("Ciclos ");
+                LCD_write_number(periodMeasured);
+                waitForPbs();
+
+                LCD_clear();
+                LCD_write_string("Inserte en pc:\n");
+                LCD_write_string("Temperatura ");
+                LCD_write_number(tempMeasured);
+                LCD_write_string("ºC");
+                waitForPbs();
+
+                measurementIndex = measurementIndex + 1;
+
+                if (measurementIndex > 3)
+                    {
+                     LCD_clear();
+                     LCD_write_number(measurementIndex-1);
+                     LCD_write_string(" medidas\nrealizadas");
+                     waitForPbs();
+
+                     LCD_clear();
+                     LCD_write_string("Extra medida?\n");
+                     LCD_write_string("(Si/No/-)");
+
+                     for (;;)                         // Pushing button 1 doesn't have any effect
+                     {
+                         button = waitForPbs();
+
+                         if (button == 3)
+                        { break; }
+
+                         if (button == 2)
+                         {
+                         inputCoefficients();
+                         break;
+                         }
+                     }
+
+                     if (button == 2)
+                     {
+                         break;
+                     }
                 }
             }
         }
-
-        vochtigheid = (10 * vochtwhole) + vochtdec; // belangrijke conversie !!!!!!!!!!!!!!!
-        periodMeasured = periodMeasured-empty;         // belangrijke conversie !!!!!!!!!!!!!!!
-
-        sumx = sumx + periodMeasured;
-        sumxy = sumxy + (periodMeasured * vochtigheid);
-        sumy = sumy + vochtigheid;
-        sumxx = sumxx + (periodMeasured * periodMeasured); /// TODO te groot getal
     }
 
-    sumxy = sumxy - (sumx * sumy);
-    sumxx = sumxx - (sumx * sumx);
+}
 
-    rico = divide2(sumxy, sumxx);
-    offset = sumy - (rico * sumx); // gaat negatief zijn??? altijd? ONDERZOEKEN!!!
+void getCoefficientsTest(void)
+{
+     LCD_clear();
+     LCD_write_string("Coeff 1\n");
+     LCD_write_number(a*);
+     waitForPbs();
+
+     LCD_clear();
+     LCD_write_string("Coeff 2\n");
+     LCD_write_number(a*10000);
+     waitForPbs();
+
+     LCD_clear();
+     LCD_write_string("Coeff 3\n");
+     LCD_write_number(a*10000000000);
+     waitForPbs();
+
+     LCD_clear();
+     LCD_write_string("Coeff 3\n");
+     LCD_write_number(a*10000000000);
+     waitForPbs();
+   
+}
+
+void getCoefficients(void)
+{
+    LCD_clear();
+    LCD_write_string("Primero coeff\n");
+    LCD_write_number(a);
+    waitForPbs();
+
+    LCD_clear();
+    LCD_write_string("Primero coeff * 100000\n");
+    LCD_write_number(a*100000);
+    waitForPbs();
+
+    LCD_clear();
+    LCD_write_string("Segundo coeff * 100000\n");
+    LCD_write_number(b*100000);
+    waitForPbs();
+
+    LCD_clear();
+    LCD_write_string("Tercero coeff* 100000\n");
+    LCD_write_number(c*100000);
+    waitForPbs();
+
+    LCD_clear();
+    LCD_write_string("Quarto coeff * 1000000\n");
+    LCD_write_number(d*100000);
+    waitForPbs();
+}
+
+unsigned int humedadPergamino(void)
+{
+    // Coefficients a and b will be used for calibration of cafe pergamino
+    // First the farmer needs to take an empty measurement
+    // Then he fills the device with cafe pergamino
+    // humedadPergamino will calculate the humidity
+
+    signed long vochtigheid;
+    unsigned int vochtigheidwhole;
+    unsigned int vochtigheiddec;
+
+    unsigned int emptyperiods;
+    unsigned int periods;
+
+    LCD_clear();
+    LCD_write_string("Vacie medidor\n");
+    waitForPb2();
+
+    measureFrequency();
+    emptyperiods = periodMeasured;
+     
+    LCD_clear();
+    LCD_write_string("Pone pergamino\n");
+    waitForPb2();
+
+    measureFrequency();
+    tempMeasureAct();
+    periods = periodMeasured;
+
+    if (periods>emptyperiods)
+    {
+        vochtigheid = periods-emptyperiods;
+        vochtigheid = 10*(a*vochtigheid + b);
+        vochtigheiddec = vochtigheid%10;
+        vochtigheidwhole = vochtigheid/10;
+
+        if (vochtigheid < 0)
+        {
+            LCD_clear();
+            LCD_write_string("Humedad: 0.0%\n");
+            LCD_write_string("Temperatura: ");
+            LCD_write_number(tempMeasured);
+            LCD_write_string(" C\n");
+        }
+
+        LCD_clear();
+            LCD_clear();
+            LCD_write_string("Humedad: ");
+            LCD_write_number(vochtigheidwhole);
+            LCD_write_string(".");
+            LCD_write_number(vochtigheiddec);
+            LCD_write_string("%\n");
+            LCD_write_number(tempMeasured);
+            LCD_write_string(" C - ");
+            LCD_write_number(periods-emptyperiods);
+    }
+
+    else
+    {
+        LCD_clear();
+        LCD_write_string("Error\n");
+        LCD_write_string("Intenta de nuevo");
+    }
+
+    waitForPb2();
+
+}
+
+unsigned int humedadOro(void)
+{
+    // Coefficients c and d will be used for calibration of cafe pergamino
+    // First the farmer needs to take an empty measurement
+    // Then he fills the device with cafe oro
+    // humedadOro will calculate the humidity
+
+    signed long vochtigheid;
+    unsigned int vochtigheidwhole;
+    unsigned int vochtigheiddec;
+
+    unsigned int emptyperiods;
+    unsigned int periods;
+
+    LCD_clear();
+    LCD_write_string("Vacie medidor\n");
+    waitForPb2();
+
+    measureFrequency();
+    emptyperiods = periodMeasured;
+
+    LCD_clear();
+    LCD_write_string("Pone oro\n");
+    waitForPb2();
+
+    measureFrequency();
+    tempMeasureAct();
+    periods = periodMeasured;
+
+    if (periods>emptyperiods)
+    {
+        vochtigheid = periods-emptyperiods;
+        vochtigheid = 10*(c*vochtigheid + d);
+        vochtigheiddec = vochtigheid%10;
+        vochtigheidwhole = vochtigheid/10;
+
+        if (vochtigheid < 0)
+        {
+            LCD_clear();
+            LCD_write_string("Humedad: 0.0%\n");
+            LCD_write_string("Temperatura: ");
+            LCD_write_number(tempMeasured);
+            LCD_write_string(" C\n");
+        }
+
+            LCD_clear();
+            LCD_write_string("Humedad: ");
+            LCD_write_number(vochtigheidwhole);
+            LCD_write_string(".");
+            LCD_write_number(vochtigheiddec);
+            LCD_write_string("%\n");
+            LCD_write_number(tempMeasured);
+            LCD_write_string(" C - ");
+            LCD_write_number(periods-emptyperiods);
+            
+    }
+
+    else
+    {
+        LCD_clear();
+        LCD_write_string("Error\n");
+        LCD_write_string("Intenta de nuevo");
+    }
+
+    waitForPb2();
+}
+
+void test(void)
+{
+    measureFrequency();
+
+    LCD_clear();
+    LCD_write_string("Periods: ");
+    LCD_write_number(periodMeasured);
+    waitForPb2();
+
 }
 
 main()
@@ -648,63 +1092,72 @@ main()
 
     char menuIndex = 1;  // Location in menu
     tempCal = 20;
-    tempCal10 = 2;
+
+    // Code om toegang te krijgen tot het kalibratieproces
+    accessCode[0] = 1;
+    accessCode[1] = 2;
+    accessCode[2] = 3;
+
+    // Om aan te geven of de toegangscode eenmaal correct werd ingevoerd, om herhalingen te vermijden
+    admin = 0;
 
     LCD_clear();
+    checkBattery();
+    
+    LCD_clear();
     LCD_write_string(menu[menuIndex].text1);
-
+    
     ADCS2 = 1;
     ADCS1 = 1;
     ADCS0 = 0;
 
     for(;;){
         char button = waitForPbs();
-	if(button == 1) // scrollDown
-	{
+    if(button == 1) // scrollDown
+    {
             if(  menu[menuIndex].actionScrollDown != 0 )     // If there is an action associated
-            {	( *(menu[menuIndex].actionScrollDown))(); }  // Execute the action
-            if	(menu[menuIndex].scrollDown != 0)            // If you go to another menu item
+            {   ( *(menu[menuIndex].actionScrollDown))(); }  // Execute the action
+            if  (menu[menuIndex].scrollDown != 0)            // If you go to another menu item
             {
                 menuIndex = menu[menuIndex].scrollDown;                 // Change index
-		LCD_clear();                                            // Clear screen
-		LCD_write_string(menu[menuIndex].text1);                // Write text 1
-		if (*menu[menuIndex].number != 0)                       // If there is a number to be written
-		{   LCD_write_number(*menu[menuIndex].number); }        // Write the number
-                LCD_write_string(menu[menuIndex].text2);                // Write text 2
-            }
-	}
+        LCD_clear();                                            // Clear screen
+        LCD_write_string(menu[menuIndex].text1);                // Write text 1
+         //if (*menu[menuIndex].number != 0)                       // If there is a number to be written
+      // {   LCD_write_number(*menu[menuIndex].number); }        // Write the number
+        //      LCD_write_string(menu[menuIndex].text2);                // Write text 2
+         }
+    }
         if(button == 3) // scrollUp
-	{
+    {
             if(  menu[menuIndex].actionScrollUp != 0 )
-            {	( *(menu[menuIndex].actionScrollUp))(); }
-            if	(menu[menuIndex].scrollUp != 0)
+            {   ( *(menu[menuIndex].actionScrollUp))(); }
+            if  (menu[menuIndex].scrollUp != 0)
             {
                 menuIndex = menu[menuIndex].scrollUp;
 
-		LCD_clear();
-		LCD_write_string(menu[menuIndex].text1);
-		if (*menu[menuIndex].number != 0)
-		{   LCD_write_number(*menu[menuIndex].number); }
-                LCD_write_string(menu[menuIndex].text2);
+        LCD_clear();
+        LCD_write_string(menu[menuIndex].text1);
+        //if (*menu[menuIndex].number != 0)
+        //{   LCD_write_number(*menu[menuIndex].number); }
+          //      LCD_write_string(menu[menuIndex].text2);
             }
-	}
-	if(button == 2) // enter
-	{
+    }
+    if(button == 2) // enter
+    {
             if(  menu[menuIndex].actionEnter != 0 )
-            {	( *(menu[menuIndex].actionEnter))(); }
+            {   ( *(menu[menuIndex].actionEnter))(); }
             if( menu[menuIndex].enter != 0)
             {
-		menuIndex = menu[menuIndex].enter;
-		LCD_clear();
-		LCD_write_string(menu[menuIndex].text1);
-		if (*menu[menuIndex].number != 0)
-		{	LCD_write_number(*menu[menuIndex].number); }
-		LCD_write_string(menu[menuIndex].text2);
+        menuIndex = menu[menuIndex].enter;
+        LCD_clear();
+        LCD_write_string(menu[menuIndex].text1);
+        //if (*menu[menuIndex].number != 0)
+        //{   LCD_write_number(*menu[menuIndex].number); }
+        //LCD_write_string(menu[menuIndex].text2);
             }
-	}
+    }
 
     }
 
 
 }
-
