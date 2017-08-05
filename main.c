@@ -74,7 +74,7 @@ void measureCapacitance(void);     // ? void measureFrequency(void)
 
 unsigned int inputTemperature(void);
 
-void calibrateTemperature(void);
+// void calibrateTemperature(void);
 
 void calibrateCoffee(void);
 
@@ -93,8 +93,6 @@ unsigned int inputHumidity(void);
 
 int inputCodeDigits(void);
 
-void getCoefficientsTest(void);
-
 void getCoefficients(void);
 
 int checkCode(int code[]);
@@ -107,11 +105,11 @@ menuItems menu[] = {
     {"2. Medir\nCafe Pergamino",3,1,2,0,0,&humedadPergamino},           //2
     {"3. Medir\nCafe Oro",4,2,3,0,0,&humedadOro},                       //3
     {"4. Extra",1,3,5,0,0,0},                                           //4
-    {"4.1 Calibrar\nTemperatura",6,10,5,0,0,&calibrateTemperature},      //5
-    {"4.2 Calibrar\nCafe",7,5,6,0,0,&calibrateCoffee},                  //6
-    {"4.3 Adaptar\ncoefficientes",8,6,7,0,0,&inputCoefficients},        //7
-    {"4.4 Mirar\ncoefficientes",9,7,8,0,0,&getCoefficients},            //8
-    {"4.5 Test",10,8,9,0,0,&test},                                          //9
+    {"4.1 Calibrar\nTemperatura",6,10,5,0,0,0},                         //5
+    {"4.1 Calibrar\nCafe",7,5,6,0,0,&calibrateCoffee},                  //6
+    {"4.2 Adaptar\ncoefficientes",8,6,7,0,0,&inputCoefficients},        //7
+    {"4.3 Mirar\ncoefficientes",9,7,8,0,0,&getCoefficients},            //8
+    {"4.4 Test",10,8,9,0,0,&test},                                          //9
     {"4.6 Regresar",5,9,4,0,0,0},                                       //10
     {"",0,0,0,0,0,0}
 };
@@ -520,7 +518,7 @@ unsigned int inputTemperature(void)
          }
 }
 
-void calibrateTemperature(void)
+/*void calibrateTemperature(void)
 {
     if (inputCodeDigits())
     {
@@ -534,7 +532,7 @@ void calibrateTemperature(void)
        // To store the calibrated temperature in memory
        tempCalAct();
     }
-}
+}*/
 
 void showMeasuredTemp(void)
 {
@@ -584,16 +582,17 @@ void inputCoefficients(void)
       unsigned int nb_coefficients = 4;
       unsigned int length_coefficient = 8;
 
-       unsigned int counter = 0;
+      unsigned int counter = 0;
+      signed int multiplier = 1;
 
         // to store the coefficients a,b,c,d
         double temp[4]={0,0,0,0};
 
         // to store the coefficients and their lengths (should this be global?)
-        unsigned int coefficientMatrix[4][8]={{0,0,10,0,0,0,0,0},
-                                      {0,0,10,0,0,0,0,0},
-                                      {0,0,10,0,0,0,0,0},
-                                      {0,0,10,0,0,0,0,0}};
+        unsigned int coefficientMatrix[4][9]={{0,0,0,10,0,0,0,0,0},
+                                      {0,0,0,10,0,0,0,0,0},
+                                      {0,0,0,10,0,0,0,0,0},
+                                      {0,0,0,10,0,0,0,0,0}};
         
 
         char button;
@@ -614,7 +613,13 @@ void inputCoefficients(void)
                 LCD_write_string("\n");
                 for (i=0; i<length_coefficient; i++)
                     {
-                        if(coefficientMatrix[coefficientNumber][i]<10){
+                        // First element on each row of the coefficient matrix is used 
+                        //     to allow both positive and negative numbers
+                        if(i==0 && coefficientMatrix[coefficientNumber][i]==0){
+                            LCD_write_string("+");
+                        } else if(i==0 && coefficientMatrix[coefficientNumber][i]==1){
+                            LCD_write_string("-");
+                        } else if(coefficientMatrix[coefficientNumber][i]<10){
                             LCD_write_number(coefficientMatrix[coefficientNumber][i]);
                         } else {
                             LCD_write_string(".");
@@ -657,7 +662,12 @@ void inputCoefficients(void)
 
                  if(button == 1)                         // Increase/forward button
                     {
-                     if(coefficientMatrix[coefficientNumber][coefficientIndex]<10){
+                     // Coefficient index 0 has two possible values 0 and 1
+                     //     indicating a positive respectively negative number
+                     if(coefficientIndex == 0){
+                        coefficientMatrix[coefficientNumber][coefficientIndex] = \
+                            (coefficientMatrix[coefficientNumber][coefficientIndex] + 1) % 2;
+                     } else if(coefficientMatrix[coefficientNumber][coefficientIndex]<10){
                         coefficientMatrix[coefficientNumber][coefficientIndex] = \
                             (coefficientMatrix[coefficientNumber][coefficientIndex] + 1) % 10;
                      }
@@ -668,20 +678,21 @@ void inputCoefficients(void)
              for (j=0; j<nb_coefficients; j++)
               {
                 
-                 counter = 0;
-                 
-                 for (k=0; k<length_coefficient; k++)
+                counter = 0;
+                multiplier = 1;
+                for (k=0; k<length_coefficient; k++)
                 {
-                     
-                    if(coefficientMatrix[j][k]<10)
-                    {
+                    // Multiply by -1 if first row element is 1, indicating a negative number
+                    if(k==0){
+                        if(coefficientMatrix[j][k]==1){
+                            multiplier = -1;
+                        }
+                    } else if(coefficientMatrix[j][k]<10) {
                         temp[j] = temp[j] + coefficientMatrix[j][k] * power(10,-(k-1-counter));
-                     }
-                    else
-                    {
+                    } else {
                         counter = 1;
                     }
-                      
+                    temp[j] = multiplier * temp[j];  
                 }
               }
   
@@ -879,30 +890,6 @@ void calibrateCoffee(void)
         }
     }
 
-}
-
-void getCoefficientsTest(void)
-{
-     LCD_clear();
-     LCD_write_string("Coeff 1\n");
-     LCD_write_number(a);
-     waitForPbs();
-
-     LCD_clear();
-     LCD_write_string("Coeff 2\n");
-     LCD_write_number(a*10000);
-     waitForPbs();
-
-     LCD_clear();
-     LCD_write_string("Coeff 3\n");
-     LCD_write_number(a*10000000000);
-     waitForPbs();
-
-     LCD_clear();
-     LCD_write_string("Coeff 3\n");
-     LCD_write_number(a*10000000000);
-     waitForPbs();
-   
 }
 
 void getCoefficients(void)
